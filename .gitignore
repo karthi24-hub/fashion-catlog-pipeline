@@ -1,4 +1,6 @@
 dataset/
+faiss/
+models/*.pt
 __pycache__/
 *.log
 .env

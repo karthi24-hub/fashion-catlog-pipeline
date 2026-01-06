@@ -1,2 +1,29 @@
 pandas
 requests
+# Core ML libraries
+torch>=2.1.0
+torchvision>=0.16.0
+
+# DINOv2 / transformers
+transformers>=4.30.0
+
+# YOLOv8
+ultralytics>=8.0.0
+
+# Image + array utilities
+Pillow>=9.0.0
+numpy>=1.24.0
+
+# FAISS (choose one)
+#faiss-cpu>=1.7.4          # CPU-only FAISS
+ faiss-gpu>=1.7.4       #  FAISS GPU build
+
+# Web API
+fastapi>=0.95.0
+uvicorn[standard]>=0.22.0
+python-multipart>=0.0.6
+aiofiles>=23.1.0
+
+# Optional / utilities
+requests>=2.31.0
+tqdm>=4.65.0

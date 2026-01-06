@@ -1,17 +1,40 @@
-# Fashion Catalog Dataset Builder
+# Fashion Catalog Pipeline
 
-downloads product images from a CSV file 
+This repository contains a **production-ready fashion visual search pipeline**.
 
 
-## Setup
-pip install -r requirements.txt
 
-Run
- python src/build_dataset.py
-Output Structure
+##  Dataset Structure
 
+Each product is stored in its own folder:
 
 dataset/products/P000001/
 ├── image_1.jpg
 ├── image_2.jpg
-└── meta.json
+├── meta.json
+└── embedding.npy # Generated product embedding
+
+
+
+
+
+## ⚙️ Setup
+
+```bash
+pip install -r requirements.txt
+
+1️ Build product embeddings
+Runs YOLO (optional) + DINOv2 and creates one embedding per product.
+
+
+python src/build_product_embeddings.py
+Output:
+dataset/products/*/embedding.npy
+
+2️ Build FAISS index
+Creates a similarity search index from all product embeddings.
+
+python src/build_faiss_index.py
+Output:
+faiss/catalog.faiss
+faiss/id_map.json
