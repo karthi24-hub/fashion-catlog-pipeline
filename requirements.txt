@@ -27,3 +27,4 @@ aiofiles>=23.1.0
 # Optional / utilities
 requests>=2.31.0
 tqdm>=4.65.0
+boto3
