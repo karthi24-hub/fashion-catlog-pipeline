@@ -4,6 +4,7 @@ import faiss
 import json
 import tempfile
 import os
+import boto3
 from dotenv import load_dotenv
 
 from .embed_dinov2 import embed_image
@@ -17,12 +18,34 @@ if not API_KEY:
 
 app = FastAPI()
 
+# Load FAISS index + id map (LOCAL)
 index = faiss.read_index("faiss/catalog.faiss")
-id_map = json.load(open("faiss/id_map.json", "r", encoding="utf-8"))
+with open("faiss/id_map.json", "r", encoding="utf-8") as f:
+    id_map = json.load(f)
+
+# -------- S3 CONFIG --------
+S3_BUCKET = "shoptainment-dev-fashion-dataset-bucket"
+S3_PREFIX = "dataset/products/"
+s3 = boto3.client("s3")
+
 
 def verify_key(x_api_key: str):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def load_meta_from_s3(pid: str) -> dict:
+    """
+    Load meta.json from S3:
+    s3://bucket/dataset/products/{pid}/meta.json
+    """
+    key = f"{S3_PREFIX}{pid}/meta.json"
+    try:
+        obj = s3.get_object(Bucket=S3_BUCKET, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception:
+        return {}
+
 
 @app.post("/search")
 async def search(file: UploadFile, x_api_key: str = Header(None)):
@@ -33,9 +56,11 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
         tmp_path = tmp.name
 
     try:
+        # Embed query image
         emb = embed_image(tmp_path)
         faiss.normalize_L2(emb.reshape(1, -1))
 
+        # Search
         D, I = index.search(emb.reshape(1, -1), k=5)
 
         results = []
@@ -44,23 +69,18 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
             if not pid:
                 continue
 
-            # local meta.json (same behavior as your old code)
-            meta_path = os.path.join("dataset", "products", pid, "meta.json")
-            meta = {}
+            # ✅ Load meta from S3
+            meta = load_meta_from_s3(pid)
 
-            if os.path.exists(meta_path):
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        meta = json.load(f)
-                except:
-                    meta = {}
-
-            results.append({"product_id": pid, "meta": meta})
+            results.append({
+                "product_id": pid,
+                "meta": meta
+            })
 
         return {"matches": results, "scores": D[0].tolist()}
 
     finally:
         try:
             os.remove(tmp_path)
-        except:
+        except Exception:
             pass
