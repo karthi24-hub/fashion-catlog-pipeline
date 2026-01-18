@@ -1,105 +1,94 @@
+import json
 import boto3
-import os
-import io
-import numpy as np
-from tqdm import tqdm
 
-# your functions
-from yolo_detector import detect_and_crop
-from embed_dinov2 import embed_image, aggregate_embeddings
-
-# ---------------- CONFIG ----------------
 BUCKET = "shoptainment-dev-fashion-dataset-bucket"
-PREFIX = "dataset/products/"   # contains product folders
-LOCAL_TMP = "tmp_download"
-os.makedirs(LOCAL_TMP, exist_ok=True)
-# ---------------------------------------
+PREFIX = "dataset/products/"
 
 s3 = boto3.client("s3")
 
 
-def list_product_ids(bucket, prefix):
+def fix_price(v):
     """
-    Get all product folder names like P000000, P000001 ...
+    Fix wrong pricing like 499900 -> 4999
+    Only applied if looks like paise mistake.
     """
-    paginator = s3.get_paginator("list_objects_v2")
-    product_ids = set()
+    if v is None:
+        return None
 
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            parts = key.replace(prefix, "").split("/")
-            if len(parts) >= 2:
-                pid = parts[0]
-                if pid.startswith("P"):
-                    product_ids.add(pid)
-
-    return sorted(product_ids)
-
-
-def s3_exists(bucket, key):
+    # ensure int
     try:
-        s3.head_object(Bucket=bucket, Key=key)
-        return True
+        v = int(v)
     except:
+        return v
+
+    # main fix rule: 499900 => 4999
+    if v >= 100000 and v % 100 == 0:
+        return v // 100
+
+    return v
+
+
+def process_meta(key: str):
+    obj = s3.get_object(Bucket=BUCKET, Key=key)
+    data = obj["Body"].read().decode("utf-8")
+    meta = json.loads(data)
+
+    pricing = meta.get("pricing", {})
+    changed = False
+
+    if "sale" in pricing:
+        old = pricing["sale"]
+        new = fix_price(old)
+        if old != new:
+            pricing["sale"] = new
+            changed = True
+
+    if "original" in pricing and pricing["original"] is not None:
+        old = pricing["original"]
+        new = fix_price(old)
+        if old != new:
+            pricing["original"] = new
+            changed = True
+
+    if not changed:
         return False
 
+    meta["pricing"] = pricing
 
-def download_s3_file(bucket, key, local_path):
-    s3.download_file(bucket, key, local_path)
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=key,
+        Body=json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
+    return True
 
 
-def upload_npy_to_s3(bucket, key, array):
-    buf = io.BytesIO()
-    np.save(buf, array)
-    buf.seek(0)
-    s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+def main():
+    paginator = s3.get_paginator("list_objects_v2")
 
+    total = 0
+    updated = 0
 
-# -------------- MAIN PROCESS --------------
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=PREFIX):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith("meta.json"):
+                continue
 
-product_ids = list_product_ids(BUCKET, PREFIX)
-print(" Total products found:", len(product_ids))
+            total += 1
 
-for pid in tqdm(product_ids):
-    product_prefix = f"{PREFIX}{pid}/"
-
-    embedding_key = f"{product_prefix}embedding.npy"
-
-    # skip if already exists
-    if s3_exists(BUCKET, embedding_key):
-        continue
-
-    # download image_1 and image_2 if exist
-    image_keys = [f"{product_prefix}image_1.jpg", f"{product_prefix}image_2.jpg"]
-
-    embeddings = []
-
-    for img_key in image_keys:
-        if not s3_exists(BUCKET, img_key):
-            continue
-
-        local_img = os.path.join(LOCAL_TMP, f"{pid}_{os.path.basename(img_key)}")
-        download_s3_file(BUCKET, img_key, local_img)
-
-        # YOLO crop (optional: returns crop paths)
-        crops = detect_and_crop(local_img)
-
-        for crop_path in crops:
             try:
-                emb = embed_image(crop_path)
-                embeddings.append(emb)
+                if process_meta(key):
+                    updated += 1
+                    print(f" Updated: {key}")
             except Exception as e:
-                print(f"Embedding failed {pid}: {e}")
+                print(f" Failed: {key} -> {e}")
 
-    if not embeddings:
-        print(f" No embeddings for {pid}")
-        continue
+    print("\nDONE ")
+    print("Total meta files:", total)
+    print("Updated meta files:", updated)
 
-    final_embedding = aggregate_embeddings(embeddings)
-    final_embedding = final_embedding.astype("float32")
 
-    # upload embedding.npy into the same S3 product folder
-    upload_npy_to_s3(BUCKET, embedding_key, final_embedding)
-
-print(" Done: embeddings generated and uploaded to S3")
+if __name__ == "__main__":
+    main()
