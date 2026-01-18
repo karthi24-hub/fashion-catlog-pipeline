@@ -26,6 +26,7 @@ with open("faiss/id_map.json", "r", encoding="utf-8") as f:
 # -------- S3 CONFIG --------
 S3_BUCKET = "shoptainment-dev-fashion-dataset-bucket"
 S3_PREFIX = "dataset/products/"
+S3_REGION = "ap-south-1"   #  add region for correct url
 s3 = boto3.client("s3")
 
 
@@ -45,6 +46,14 @@ def load_meta_from_s3(pid: str) -> dict:
         return json.loads(obj["Body"].read().decode("utf-8"))
     except Exception:
         return {}
+
+
+def get_product_image_url(pid: str) -> str:
+    """
+    Always return image_1.jpg public url from s3.
+    """
+    key = f"{S3_PREFIX}{pid}/image_1.jpg"
+    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{key}"
 
 
 @app.post("/search")
@@ -69,12 +78,16 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
             if not pid:
                 continue
 
-            # ✅ Load meta from S3
+            #  Load meta from S3
             meta = load_meta_from_s3(pid)
+
+            #  Add 1 image url
+            image_url = get_product_image_url(pid)
 
             results.append({
                 "product_id": pid,
-                "meta": meta
+                "meta": meta,
+                "image_url": image_url
             })
 
         return {"matches": results, "scores": D[0].tolist()}
