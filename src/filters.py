@@ -97,7 +97,17 @@ def filter_by_category(products: List[Dict[str, Any]], target_category: str) -> 
     
     filtered = []
     for product in products:
-        product_category = product.get('meta', {}).get('category', '').lower()
+        #  FIX: Handle both string and dict category formats
+        category_data = product.get('meta', {}).get('category', '')
+        
+        if isinstance(category_data, dict):
+            # Extract 'id' from dict: {"id": "earring", "label": "Earrings"}
+            product_category = category_data.get('id', '').lower()
+        elif isinstance(category_data, str):
+            # Already a string: "earring"
+            product_category = category_data.lower()
+        else:
+            product_category = ''
         
         # Direct match or group match
         if product_category in allowed or product_category == target_category.lower():
@@ -105,7 +115,6 @@ def filter_by_category(products: List[Dict[str, Any]], target_category: str) -> 
     
     logger.info(f"Category filter: {len(products)} → {len(filtered)} products (target: {target_category})")
     return filtered
-
 
 def get_color_tier(query_color: str, product_color: str) -> str:
     """
@@ -168,15 +177,34 @@ def filter_by_color_tiered(
                 no_color_matches.append(product)
             continue
         
-        # Normalize product colors
-        product_colors = [c.lower() for c in product_colors]
+        # ✅ FIX: Normalize product colors (handle dict, string, and mixed formats)
+        normalized_colors = []
+        for c in product_colors:
+            if isinstance(c, dict):
+                # Extract 'name' from dict: {"name": "white", "hex": "#FFFFFF"}
+                color_name = c.get('name', c.get('id', ''))
+                if color_name:
+                    normalized_colors.append(color_name.lower())
+            elif isinstance(c, str):
+                # Already a string: "white"
+                normalized_colors.append(c.lower())
+        
+        product_colors = normalized_colors  # Replace with normalized version
+        
+        # Skip if no valid colors after normalization
+        if not product_colors:
+            if include_no_color:
+                no_color_matches.append(product)
+            continue
         
         # Find best matching tier across all query colors
         best_tier = "none"
         
         for qc in query_colors:
+            qc_lower = qc.lower() if isinstance(qc, str) else str(qc).lower()
+            
             for pc in product_colors:
-                tier = get_color_tier(qc, pc)
+                tier = get_color_tier(qc_lower, pc)
                 
                 # Update best tier (exact > similar > related > none)
                 if tier == "exact":
@@ -208,8 +236,6 @@ def filter_by_color_tiered(
                 f"{len(related_matches)} related, {len(no_color_matches)} no-color")
     
     return result
-
-
 def filter_by_gender(products: List[Dict[str, Any]], target_gender: str) -> List[Dict[str, Any]]:
     """
     Optional: Filter products by gender.
@@ -228,7 +254,8 @@ def filter_by_gender(products: List[Dict[str, Any]], target_gender: str) -> List
     
     filtered = []
     for product in products:
-        product_gender = product.get('meta', {}).get('gender', '').lower()
+        #  FIX: Gender is inside attributes
+        product_gender = product.get('meta', {}).get('attributes', {}).get('gender', '').lower()
         
         # Match target gender or unisex products
         if product_gender == target_gender or product_gender == 'unisex' or not product_gender:
@@ -236,8 +263,6 @@ def filter_by_gender(products: List[Dict[str, Any]], target_gender: str) -> List
     
     logger.info(f"Gender filter: {len(products)} → {len(filtered)} products (target: {target_gender})")
     return filtered
-
-
 def apply_all_filters(
     products: List[Dict[str, Any]],
     category: str = None,
