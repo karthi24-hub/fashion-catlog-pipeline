@@ -216,21 +216,13 @@ def search_faiss(embedding: np.ndarray, k: int = FAISS_K) -> List[Dict[str, Any]
     
     return products
 
-
 @app.post("/search")
 async def search(file: UploadFile, x_api_key: str = Header(None)):
     """
-    Multi-item visual search endpoint.
+    Multi-item visual search endpoint with backward compatibility.
     
-    Flow:
-    1. YOLO detects items in uploaded image
-    2. For each detected item:
-       - CLIP classifies category
-       - Extract colors
-       - DINOv2 embedding
-       - Search FAISS (top 500)
-       - Post-filter by category + color (tiered)
-    3. Return results for all detected items
+    Returns both NEW format (detected_items) and OLD format (matches)
+    for frontend compatibility.
     """
     verify_key(x_api_key)
     
@@ -252,6 +244,7 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
         logger.info(f"Detected {len(detections)} items")
         
         detected_items = []
+        all_matches = []  # ← For backward compatibility
         
         # Step 2: Process each detected item
         for det in detections:
@@ -269,11 +262,9 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
             search_categories = get_fallback_categories(category, clip_conf)
             
             # 2b: Extract colors
-            # Use empty title for now (could enhance with OCR later)
             detected_colors = extract_colors_ensemble(crop, "")
             
             # 2c: Generate DINOv2 embedding
-            # Save crop to temp file (embed_image expects path)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_crop:
                 crop.save(tmp_crop.name, format="JPEG", quality=90)
                 try:
@@ -305,17 +296,35 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
                 else:
                     img_path = "image_1.jpg"
                 
-                matches.append({
+                # Get category string (handle both dict and string)
+                category_data = meta.get("category", "")
+                if isinstance(category_data, dict):
+                    category_str = category_data.get("id", "")
+                    category_label = category_data.get("label", "")
+                else:
+                    category_str = category_data
+                    category_label = category_data
+                
+                match_obj = {
                     "product_id": pid,
-                    "title": meta.get("title", ""),
-                    "category": meta.get("category", ""),
-                    "colors": meta.get("attributes", {}).get("colors", []),
-                    "image_url": get_product_image_url(pid, img_path),
-                    "buy_link": meta.get("source_url", meta.get("url", "")),
-                    "similarity_score": round(product["similarity_score"], 4),
-                    "pricing": meta.get("pricing", {})
-                })
+                    "meta": {
+                        "product_id": pid,
+                        "title": meta.get("title", ""),
+                        "category": {
+                            "id": category_str,
+                            "label": category_label
+                        },
+                        "pricing": meta.get("pricing", {}),
+                        "attributes": meta.get("attributes", {}),
+                        "images": meta.get("images", []),
+                        "source": meta.get("source", {})
+                    },
+                    "similarity_score": round(product["similarity_score"], 4)
+                }
+                
+                matches.append(match_obj)
             
+            # Add to detected items (NEW format)
             detected_items.append({
                 "item_index": det["index"],
                 "bbox": det["bbox"],
@@ -323,18 +332,80 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
                 "category": category,
                 "specific_label": specific_label,
                 "clip_confidence": round(clip_conf, 4),
-                "detected_colors": detected_colors[:3],  # Top 3 colors
+                "detected_colors": detected_colors[:3],
                 "matches": matches
             })
+            
+            # Add to all_matches for backward compatibility (OLD format)
+            all_matches.extend(matches)
         
+        # ========== BACKWARD COMPATIBILITY ==========
         # Handle case: no items detected
         if not detected_items:
-            return {
-                "detected_items": [],
-                "message": "No clothing items detected. Please upload an image with visible clothing."
-            }
+            # Fallback: Search full image without YOLO detection
+            logger.info("No YOLO detections, falling back to full image search")
+            
+            try:
+                # Use full image
+                embedding = embed_image(image_path)
+                faiss_results = search_faiss(embedding, k=10)
+                
+                # Format as old-style matches
+                fallback_matches = []
+                for product in faiss_results:
+                    pid = product["product_id"]
+                    meta = product["meta"]
+                    
+                    images = meta.get("images", [])
+                    img_path = images[0].get("path", "image_1.jpg") if images else "image_1.jpg"
+                    
+                    category_data = meta.get("category", "")
+                    if isinstance(category_data, dict):
+                        category_str = category_data.get("id", "")
+                        category_label = category_data.get("label", "")
+                    else:
+                        category_str = category_data
+                        category_label = category_data
+                    
+                    fallback_matches.append({
+                        "product_id": pid,
+                        "meta": {
+                            "product_id": pid,
+                            "title": meta.get("title", ""),
+                            "category": {
+                                "id": category_str,
+                                "label": category_label
+                            },
+                            "pricing": meta.get("pricing", {}),
+                            "attributes": meta.get("attributes", {}),
+                            "images": meta.get("images", []),
+                            "source": meta.get("source", {})
+                        },
+                        "similarity_score": round(product["similarity_score"], 4)
+                    })
+                
+                # Return OLD format only (for compatibility)
+                return {
+                    "matches": fallback_matches,
+                    "detected_items": [],
+                    "total_items": 0,
+                    "message": "No items detected by YOLO. Showing results for full image."
+                }
+            
+            except Exception as e:
+                logger.error(f"Fallback search failed: {e}")
+                return {
+                    "matches": [],
+                    "detected_items": [],
+                    "message": "No clothing items detected. Please upload an image with visible clothing."
+                }
         
+        # Return BOTH formats for compatibility
         return {
+            # OLD format (frontend uses this) 
+            "matches": all_matches[:10],
+            
+            # NEW format (for future use)
             "detected_items": detected_items,
             "total_items": len(detected_items)
         }
@@ -349,7 +420,6 @@ async def search(file: UploadFile, x_api_key: str = Header(None)):
             os.remove(image_path)
         except:
             pass
-
 
 @app.get("/health")
 async def health():
