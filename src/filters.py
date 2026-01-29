@@ -247,14 +247,15 @@ def filter_by_gender(products: List[Dict[str, Any]], target_gender: str) -> List
     Returns:
         Filtered products
     """
-    if not target_gender:
+    #  FIX: Handle None, empty string, or non-string values (like int)
+    if not target_gender or not isinstance(target_gender, str):
         return products
     
     target_gender = target_gender.lower()
     
     filtered = []
     for product in products:
-        #  FIX: Gender is inside attributes
+        # Gender is inside attributes
         product_gender = product.get('meta', {}).get('attributes', {}).get('gender', '').lower()
         
         # Match target gender or unisex products
