@@ -264,6 +264,7 @@ def filter_by_gender(products: List[Dict[str, Any]], target_gender: str) -> List
     
     logger.info(f"Gender filter: {len(products)} → {len(filtered)} products (target: {target_gender})")
     return filtered
+
 def apply_all_filters(
     products: List[Dict[str, Any]],
     category: str = None,
@@ -274,36 +275,25 @@ def apply_all_filters(
     """
     Apply all post-filters in sequence.
     Order: Category → Color (tiered) → Gender → Limit
-    
-    Args:
-        products: Raw FAISS search results
-        category: Target category
-        colors: Query colors
-        gender: Target gender (optional)
-        max_results: Maximum results to return
-    
-    Returns:
-        Filtered and ranked products
     """
+
+    original = products
+
+    # Apply filters
     result = products
-    
-    # Apply category filter
     if category:
         result = filter_by_category(result, category)
-    
-    # Apply tiered color filter
     if colors:
         result = filter_by_color_tiered(result, colors)
-    
-    # Apply gender filter (optional)
     if gender:
         result = filter_by_gender(result, gender)
-    
-    # Limit results
-    final_result = result[:max_results]
-    
-    logger.info(f"Final filtering: {len(products)} → {len(final_result)} products")
-    return final_result
+
+    # Fallback: if filtering was too strict
+    if not result:
+        logger.warning("No products after filtering, returning original FAISS results")
+        return original[:max_results]
+
+    return result[:max_results]
 
 
 if __name__ == "__main__":
