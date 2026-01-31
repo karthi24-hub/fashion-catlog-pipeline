@@ -52,10 +52,10 @@ COLOR_KEYWORDS = {
 # RGB reference colors for K-means mapping
 RGB_REFERENCE = {
     'red': (220, 20, 60),
-    'maroon': (128, 0, 0),
+    'maroon': (90, 0, 0),    # Darkened from 128 to match real fabrics
     'pink': (255, 105, 180),
     'blue': (65, 105, 225),
-    'navy': (0, 0, 128),
+    'navy': (0, 0, 90),      # Darkened from 128 to match real fabrics
     'teal': (0, 128, 128),
     'green': (34, 139, 34),
     'olive': (128, 128, 0),
@@ -147,7 +147,8 @@ def extract_dominant_colors(image: Image.Image, k: int = 5) -> List[str]:
         pixels = np.array(img).reshape(-1, 3)
         
         # Remove near-white and near-black pixels (often background)
-        mask = ~((pixels.sum(axis=1) > 700) | (pixels.sum(axis=1) < 50))
+        # Lowered threshold from 50 to 25 to capture dark colors like maroon/navy
+        mask = ~((pixels.sum(axis=1) > 700) | (pixels.sum(axis=1) < 25))
         filtered_pixels = pixels[mask]
         
         # If too few pixels after filtering, use original

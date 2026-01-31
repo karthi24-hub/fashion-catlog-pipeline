@@ -79,9 +79,9 @@ else:
     logger.warning("Ultralytics not installed. YOLO detection disabled.")
 
 # ============ CONFIGURATION ============
-MAX_ITEMS_PER_IMAGE = 5  # Limit items to prevent timeout
+MAX_ITEMS_PER_IMAGE = 10  # Increased from 5 to allow for more accessories
 FAISS_K = 500  # Number of candidates to retrieve from FAISS
-MIN_CONFIDENCE = 0.25  # Minimum YOLO detection confidence
+MIN_CONFIDENCE = 0.15  # Lowered from 0.25 to detect smaller accessories like watches/caps
 CLIP_CONFIDENCE_THRESHOLD = 0.3  # Minimum CLIP classification confidence
 
 
