@@ -5,7 +5,7 @@ import boto3
 import logging
 import concurrent.futures
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from color_extractor import extract_from_title
 
 # ================= CONFIG =================
